@@ -4,7 +4,7 @@ import './App.css';
 function App() {
 
   const handleGasControl = () => {
-    alert('[수정 후] 가스 제어 버튼이 클릭되었습니다.');
+    alert('가스 제어 버튼이 클릭되었습니다!');
   };
 
   const handleEmergencyStop = () => {
@@ -28,7 +28,7 @@ function App() {
             className="emergency-button"
             onClick={handleEmergencyStop}
           >
-            긴급 정지
+            긴급 정지 !!
           </button>
         </div>
       </div>
