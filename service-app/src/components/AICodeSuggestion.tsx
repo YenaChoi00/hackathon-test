@@ -67,7 +67,7 @@ const styles = {
 };
 
 const AICodeSuggestion: React.FC = () => {
-  const [apiKey, setApiKey] = useState('');
+  const [caludeApiKey, setCaludeApiKey] = useState('');
   const [message, setMessage] = useState('');
   const [response, setResponse] = useState('');
   const [loading, setLoading] = useState(false);
@@ -78,26 +78,81 @@ const AICodeSuggestion: React.FC = () => {
     console.log(result);
   }, [result]);
 
+  // GitHub API를 통해 파일 읽기
+  const readFileFromGitHub = async (path: string) => {
+    try {
+      const response = await fetch(`https://api.github.com/repos/${process.env.REACT_APP_GITHUB_OWNER}/${process.env.REACT_APP_GITHUB_REPO}/contents/${path}`, {
+        headers: {
+          'Authorization': `Bearer ${process.env.REACT_APP_GITHUB_TOKEN}`,
+          'Accept': 'application/vnd.github.v3.raw'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`GitHub API 오류: ${response.statusText}`);
+      }
+
+      return await response.text();
+    } catch (error) {
+      console.error('GitHub 파일 읽기 오류:', error);
+      throw error;
+    }
+  };
+
+  // 현재 브랜치 가져오기
+  const getCurrentBranch = async () => {
+    try {
+      const response = await fetch(`https://api.github.com/repos/${process.env.REACT_APP_GITHUB_OWNER}/${process.env.REACT_APP_GITHUB_REPO}/git/refs/heads/main`, {
+        headers: {
+          'Authorization': `Bearer ${process.env.REACT_APP_GITHUB_TOKEN}`
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error('브랜치 정보를 가져올 수 없습니다.');
+      }
+
+      const data = await response.json();
+      return data.object.sha;
+    } catch (error) {
+      console.error('브랜치 정보 가져오기 오류:', error);
+      throw error;
+    }
+  };
+
   // Claude API 호출 함수
-  const testClaudeAPI = async () => {
+  const askClaudeAPI = async () => {
     setLoading(true);
     setError('');
     setResponse('');
     
     try {
+      const currentCode = await readFileFromGitHub('gas-app/src/App.tsx');
+      const prompt = `현재 gas-app/src/App.tsx 파일의 코드입니다:
+
+\`\`\`typescript
+${currentCode}
+\`\`\`
+
+요청사항: ${message}
+
+응답은 다음 형식으로 해주세요:
+1. 질문에 대한 설명 또는 요청에 따른 변경사항 설명
+2. 전체 변경된 코드를 \`\`\`typescript\n...\`\`\` 블록으로 제공`;
+
       const result = await axios.post(
         '/v1/messages',
         {
           model: 'claude-sonnet-4-20250514',
           max_tokens: 1024,
           messages: [
-            { role: 'user', content: message }
+            { role: 'user', content: prompt }
           ]
         },
         {
           headers: {
             'Content-Type': 'application/json',
-            'x-api-key': apiKey,
+            'x-api-key': caludeApiKey,
             'anthropic-version': '2023-06-01',
             'anthropic-dangerous-direct-browser-access': 'true'
           }
@@ -121,34 +176,142 @@ const AICodeSuggestion: React.FC = () => {
     lineEnd?: number;
   }) => {
     try {
-      const response = await fetch('https://api.github.com/repos/OWNER/REPO/pulls', {
+      // const baseBranch = await getCurrentBranch();
+      const newBranchName = 'feature/code-suggestion';
+      
+      // 1. 새 브랜치 생성
+      // await fetch(`https://api.github.com/repos/${process.env.REACT_APP_GITHUB_OWNER}/${process.env.REACT_APP_GITHUB_REPO}/git/refs`, {
+      //   method: 'POST',
+      //   headers: {
+      //     'Authorization': `Bearer ${process.env.REACT_APP_GITHUB_TOKEN}`,
+      //     'Content-Type': 'application/json',
+      //   },
+      //   body: JSON.stringify({
+      //     ref: `refs/heads/${newBranchName}`,
+      //     sha: baseBranch
+      //   })
+      // });
+
+      // 2. 현재 파일 내용 가져오기 (PR 설명용)
+      const currentFile = await readFileFromGitHub(fileChanges.path);
+
+      // 3. main의 최신 커밋 가져오기
+      const mainRef = await fetch(`https://api.github.com/repos/${process.env.REACT_APP_GITHUB_OWNER}/${process.env.REACT_APP_GITHUB_REPO}/git/refs/heads/main`, {
+        headers: {
+          'Authorization': `Bearer ${process.env.REACT_APP_GITHUB_TOKEN}`
+        }
+      }).then(res => res.json());
+
+      // 4. 새 트리 생성
+      const treeResponse = await fetch(`https://api.github.com/repos/${process.env.REACT_APP_GITHUB_OWNER}/${process.env.REACT_APP_GITHUB_REPO}/git/trees`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${process.env.REACT_APP_GITHUB_TOKEN}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          title: '코드 변경 제안',
-          body: `
-## 변경 제안 내용
-파일: ${fileChanges.path}
-${fileChanges.lineStart ? `라인: ${fileChanges.lineStart}-${fileChanges.lineEnd}` : ''}
+          base_tree: mainRef.object.sha,
+          tree: [{
+            path: fileChanges.path,
+            mode: '100644',
+            type: 'blob',
+            content: fileChanges.content
+          }]
+        })
+      }).then(res => res.json());
 
-\`\`\`typescript
-${fileChanges.content}
-\`\`\`
-`,
-          head: 'feature/code-suggestion',
-          base: 'main'
+      // 5. 새 커밋 생성
+      const commitResponse = await fetch(`https://api.github.com/repos/${process.env.REACT_APP_GITHUB_OWNER}/${process.env.REACT_APP_GITHUB_REPO}/git/commits`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.REACT_APP_GITHUB_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: '코드 변경 제안',
+          tree: treeResponse.sha,
+          parents: [mainRef.object.sha]
+        })
+      }).then(res => res.json());
+
+      // 6. 브랜치의 현재 커밋 가져오기
+      const branchResponse = await fetch(`https://api.github.com/repos/${process.env.REACT_APP_GITHUB_OWNER}/${process.env.REACT_APP_GITHUB_REPO}/git/refs/heads/${newBranchName}`, {
+        headers: {
+          'Authorization': `Bearer ${process.env.REACT_APP_GITHUB_TOKEN}`
+        }
+      }).then(res => res.json());
+
+      // 7. 새 커밋 생성 (이전 커밋을 부모로 설정)
+      const newCommitResponse = await fetch(`https://api.github.com/repos/${process.env.REACT_APP_GITHUB_OWNER}/${process.env.REACT_APP_GITHUB_REPO}/git/commits`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.REACT_APP_GITHUB_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: '코드 변경 제안',
+          tree: treeResponse.sha,
+          parents: [branchResponse.object.sha]  // 현재 브랜치의 커밋을 부모로 설정
+        })
+      }).then(res => res.json());
+
+      // 8. 브랜치 업데이트 (force 없이)
+      const updateBranchResponse = await fetch(`https://api.github.com/repos/${process.env.REACT_APP_GITHUB_OWNER}/${process.env.REACT_APP_GITHUB_REPO}/git/refs/heads/${newBranchName}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${process.env.REACT_APP_GITHUB_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sha: newCommitResponse.sha
         })
       });
 
-      if (!response.ok) {
-        throw new Error('PR 생성 실패');
+      if (!updateBranchResponse.ok) {
+        throw new Error('브랜치 업데이트 실패: ' + await updateBranchResponse.text());
       }
 
-      const data = await response.json();
-      setResult(`PR이 생성되었습니다: ${data.html_url}`);
+      // 9. PR 설명 업데이트
+      const prsResponse = await fetch(`https://api.github.com/repos/${process.env.REACT_APP_GITHUB_OWNER}/${process.env.REACT_APP_GITHUB_REPO}/pulls?head=${process.env.REACT_APP_GITHUB_OWNER}:${newBranchName}&state=open`, {
+        headers: {
+          'Authorization': `Bearer ${process.env.REACT_APP_GITHUB_TOKEN}`
+        }
+      }).then(res => res.json());
+
+      if (prsResponse.length > 0) {
+        const prNumber = prsResponse[0].number;
+        await fetch(`https://api.github.com/repos/${process.env.REACT_APP_GITHUB_OWNER}/${process.env.REACT_APP_GITHUB_REPO}/pulls/${prNumber}`, {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${process.env.REACT_APP_GITHUB_TOKEN}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            body: `## 최근 변경 제안 내용
+파일: ${fileChanges.path}
+
+### 변경 전
+\`\`\`typescript
+${currentFile}
+\`\`\`
+
+### 변경 후
+\`\`\`typescript
+${fileChanges.content}
+\`\`\`
+`
+          })
+        });
+      }
+
+      setResult(`새로운 커밋이 feature/code-suggestion 브랜치에 추가되었습니다.
+변경된 파일: ${fileChanges.path}
+
+[변경 전]
+${currentFile}
+
+[변경 후]
+${fileChanges.content}`);
     } catch (error) {
       console.error('PR 생성 중 오류:', error);
       setResult('PR 생성 중 오류가 발생했습니다.');
@@ -173,8 +336,8 @@ ${fileChanges.content}
           id="api-key"
           type="password" 
           style={styles.input}
-          value={apiKey} 
-          onChange={(e) => setApiKey(e.target.value)}
+          value={caludeApiKey} 
+          onChange={(e) => setCaludeApiKey(e.target.value)}
           placeholder="sk-ant-api03-..."
         />
       </div>
@@ -193,11 +356,11 @@ ${fileChanges.content}
       
       <div style={styles.buttonGroup}>
         <button 
-          onClick={testClaudeAPI}
-          disabled={!apiKey || !message || loading}
+          onClick={askClaudeAPI}
+          disabled={!caludeApiKey || !message || loading}
           style={{
             ...styles.button,
-            ...((!apiKey || !message || loading) && styles.buttonDisabled)
+            ...((!caludeApiKey || !message || loading) && styles.buttonDisabled)
           }}
         >
           {loading ? '분석 중...' : 'AI에게 물어보기'}
@@ -210,7 +373,7 @@ ${fileChanges.content}
               const prMatch = response.match(/```typescript\n([\s\S]*?)```/);
               if (prMatch) {
                 createPullRequest({
-                  path: 'src/App.tsx', // 기본 파일 경로
+                  path: 'gas-app/src/App.tsx', // 임시 고정
                   content: prMatch[1].trim()
                 });
               }
@@ -244,6 +407,76 @@ ${fileChanges.content}
           <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{response}</p>
         </div>
       )}
+
+      {/* GitHub API 테스트 섹션 */}
+      <div style={{ marginTop: '40px', borderTop: '1px solid #ddd', paddingTop: '20px' }}>
+        <h2 style={{ color: '#333', marginBottom: '20px' }}>GitHub API 테스트</h2>
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+          <button
+            onClick={async () => {
+              console.log('GitHub API 테스트 시작');
+              try {
+                setLoading(true);
+                const code = await readFileFromGitHub('gas-app/src/App.tsx');
+                setResult(`파일 읽기 성공!\n\n=== gas-app/src/App.tsx ===\n${code}`);
+              } catch (error) {
+                setError('GitHub API 테스트 실패: ' + (error as Error).message);
+              } finally {
+                setLoading(false);
+              }
+            }}
+            style={{
+              ...styles.button,
+              backgroundColor: '#6f42c1'
+            }}
+            disabled={loading}
+          >
+            {loading ? '파일 읽는 중...' : 'GitHub 파일 읽기 테스트'}
+          </button>
+
+          <button
+            onClick={async () => {
+              console.log('GitHub PR 테스트 시작');
+              try {
+                setLoading(true);
+                const prMatch = response.match(/```typescript\n([\s\S]*?)```/);
+                if (prMatch) {
+                  await createPullRequest({
+                    path: 'gas-app/src/App.tsx',
+                    content: prMatch[1].trim(),
+                  });
+                } else {
+                  setError('AI 응답에서 코드 블록을 찾을 수 없습니다.');
+                }
+              } catch (error) {
+                setError('GitHub PR 테스트 실패: ' + (error as Error).message);
+              } finally {
+                setLoading(false);
+              }
+            }}
+            style={{
+              ...styles.button,
+              backgroundColor: '#28a745'
+            }}
+            disabled={loading}
+          >
+            {loading ? 'PR 생성 중...' : 'GitHub PR 생성 테스트'}
+          </button>
+        </div>
+
+        {result && (
+          <div style={{
+            ...styles.responseBox,
+            backgroundColor: '#f0fff4',
+            border: '1px solid #68d391'
+          }}>
+            <h3 style={{ margin: '0 0 10px 0' }}>GitHub API 테스트 결과</h3>
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>
+              {result}
+            </pre>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
