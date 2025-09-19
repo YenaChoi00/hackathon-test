@@ -1,0 +1,15 @@
+{
+  "name": "toy",
+  "version": "1.0.0",
+  "description": "AI code suggestion system with iframe integration",
+  "scripts": {
+    "install:all": "concurrently \"cd service-app && npm install\" \"cd gas-app && npm install\"",
+    "start:service": "cd service-app && npm start",
+    "start:gas": "cd gas-app && PORT=3001 npm start",
+    "start": "concurrently \"npm run start:service\" \"npm run start:gas\"",
+    "dev": "npm run start"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

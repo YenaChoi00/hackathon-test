@@ -1,46 +1,36 @@
-# Toy Project
+# AI Code Suggestion
 
-AI를 활용한 코드 제안 및 변경 시스템
+AI를 활용하여 코드 변경을 제안하고, GitHub PR을 자동으로 생성하는 시스템
 
-## 프로젝트 구조
+## 기능
 
-- `service-app/`: 메인 서비스 애플리케이션
-  - AI 코드 제안 기능
-  - iframe을 통한 앱 통합
-  - GitHub PR 생성 기능
+- 자연어로 코드 변경 요청
+- Claude API를 통한 코드 제안
+- GitHub PR 자동 생성 및 업데이트
+- 실시간 코드 변경 미리보기 (iframe)
 
-- `gas-app/`: iframe으로 통합되는 데모 앱
-  - 실시간 코드 변경 적용
-  - 메시지 통신 기능
+## 실행 방법
 
-## 시작하기
-
-1. 서비스 앱 실행:
 ```bash
-cd service-app
-npm install
-npm start
+npm install         # concurrently 설치
+npm run install:all # 의존성 설치
+npm start          # 앱 실행 (service-app:3000, gas-app:3001)
 ```
 
-2. Gas 앱 실행:
-```bash
-cd gas-app
-npm install
-PORT=3001 npm start
-```
-
-## 환경 변수 설정
-
-`.env` 파일을 각 앱 디렉토리에 생성하고 다음 값들을 설정하세요:
+## 환경 설정
 
 ### service-app/.env
 ```
+# GitHub 설정
+REACT_APP_GITHUB_OWNER=your_username
+REACT_APP_GITHUB_REPO=your_repo
 REACT_APP_GITHUB_TOKEN=your_github_token
+
+# Claude API 설정
+REACT_APP_CLAUDE_API_KEY=your_claude_api_key
 ```
 
-## 주요 기능
+## 프로젝트 구조
 
-- Claude API를 활용한 코드 제안
-- GitHub PR 자동 생성
-- iframe 통합 및 실시간 코드 변경
-- 양방향 앱 통신
+- `service-app/`: AI 코드 제안 & PR 생성
+- `gas-app/`: 데모 앱 (코드 변경 대상)
