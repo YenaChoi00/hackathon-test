@@ -12,7 +12,7 @@ function App() {
   };
 
   return (
-    <div className="App">
+    <div className="App" style={{ backgroundColor: 'black', minHeight: '100vh' }}>
       <div className="App-header">
         <img src={logo} className="App-logo" alt="logo" />
         <h1>GasApp</h1>
